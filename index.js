@@ -3,7 +3,7 @@ const axios = require('axios');
 const yaml = require('js-yaml');
 const app = express();
 
-const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/luestr/ProxyResource/refs/heads/main/Tool/Clash/Config/Clash_Sample_Configuration_By_iKeLee.yaml';
+const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/Repcz/Tool/refs/heads/X/Clash/Meta/Mihomo.yaml';
 
 // 工具函数：加载远程 YAML 配置并解析为对象
 async function loadYaml(url) {
