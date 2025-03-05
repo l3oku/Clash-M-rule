@@ -3,7 +3,7 @@ const axios = require('axios');
 const yaml = require('js-yaml');
 const app = express();
 
-const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/6otho/Yaml-PaKo/refs/heads/main/PAKO2-ZIYONG.yaml';
+const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
 // 工具函数：加载远程 YAML 配置并解析为对象
 async function loadYaml(url) {
