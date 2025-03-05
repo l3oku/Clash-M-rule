@@ -33,14 +33,17 @@ app.get('/', async (req, res) => {
     let decodedData;
     try {
       decodedData = Buffer.from(rawData, 'base64').toString('utf-8');
-      if (!decodedData.includes('proxies:') && !decodedData.includes('port:') && !decodedData.includes('mixed-port:')) {
+      // 如果解码后数据中不含关键字，则直接使用原始数据
+      if (!decodedData.includes('proxies:') &&
+          !decodedData.includes('port:') &&
+          !decodedData.includes('mixed-port:')) {
         decodedData = rawData;
       }
     } catch (e) {
       decodedData = rawData;
     }
     
-    // 4. 根据内容判断：如果包含 proxies 或 port 则认为是标准 YAML 配置
+    // 4. 判断数据格式：如果包含 proxies 或 port，则认为是标准 YAML 配置
     let subConfig = null;
     if (
       decodedData.includes('proxies:') ||
@@ -55,7 +58,7 @@ app.get('/', async (req, res) => {
         }
       }
     } else {
-      // 5. 否则，按自定义格式解析（每行一个节点，字段以 | 分隔）
+      // 5. 否则，按自定义格式解析（每行一个节点，字段用 | 分隔）
       const proxies = decodedData
         .split('\n')
         .filter(line => line.trim())
@@ -64,7 +67,8 @@ app.get('/', async (req, res) => {
           if (parts.length < 5) return null;
           const [type, server, port, cipher, password] = parts;
           return {
-            name: `${server}-${port}`, // 自动生成名称
+            // 原来自动生成名称为 `${server}-${port}`，这里我们直接覆盖为默认名称
+            name: 'Default-sub',
             type: type || 'ss',
             server,
             port: parseInt(port),
@@ -76,23 +80,21 @@ app.get('/', async (req, res) => {
       subConfig = { proxies };
     }
     
-    // 6. 检查代理数据中是否有名称，如果没有则自动生成
-    if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
+    // 6. 强制将所有订阅数据中的代理节点名称都设置为 "Default-sub"
+    if (subConfig && subConfig.proxies && Array.isArray(subConfig.proxies)) {
       subConfig.proxies = subConfig.proxies.map(proxy => {
-        if (!proxy.name) {
-          // 如果有 remark 字段则用 remark，否则使用 server 和 port 拼接
-          proxy.name = proxy.remark || `${proxy.server}-${proxy.port}`;
-        }
+        proxy.name = 'Default-sub';
         return proxy;
       });
       
-      // 将订阅数据中的代理列表嫁接到固定模板中
+      // 用订阅的代理列表替换固定模板中的 proxies
       fixedConfig.proxies = subConfig.proxies;
       
-      // 同步更新模板中的代理分组名称列表
-      if (fixedConfig['proxy-groups']) {
+      // 同步更新模板中 proxy-groups 的代理名称列表
+      if (fixedConfig['proxy-groups'] && Array.isArray(fixedConfig['proxy-groups'])) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.proxies && Array.isArray(group.proxies)) {
+            // 这里直接使用订阅中所有代理的名称
             return { ...group, proxies: subConfig.proxies.map(p => p.name) };
           }
           return group;
@@ -100,7 +102,7 @@ app.get('/', async (req, res) => {
       }
     }
     
-    // 7. 输出最终的 YAML 配置，格式基于你的模板，同时包含最新代理数据
+    // 7. 输出最终的 YAML 配置（保持模板格式，同时使用最新的代理数据）
     res.set('Content-Type', 'text/yaml');
     res.send(yaml.dump(fixedConfig));
   } catch (error) {
