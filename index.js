@@ -5,13 +5,22 @@ const app = express();
 
 const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
-// 辅助函数：通过正则过滤对节点名称进行归一化，并去重
+// 用正则提取“服务器-端口”，构造归一化的标识
+function normalizeName(name) {
+  // 匹配形如 "server-port" 或 "server port" 的格式
+  const match = name.match(/^([^-\s]+)[-\s]*(\d+)$/);
+  if (match) {
+    return match[1].toLowerCase() + ':' + match[2];
+  }
+  return name.replace(/\s+/g, '').toLowerCase();
+}
+
+// 归一化后去重
 function dedupeNames(names) {
   const seen = new Set();
   const result = [];
   names.forEach(name => {
-    // 用正则去除所有空白字符，并转成小写进行归一化
-    const normalized = name.replace(/\s+/g, '').toLowerCase();
+    const normalized = normalizeName(name);
     if (!seen.has(normalized)) {
       seen.add(normalized);
       result.push(name);
@@ -49,7 +58,9 @@ app.get('/', async (req, res) => {
     try {
       decodedData = Buffer.from(rawData, 'base64').toString('utf-8');
       // 如果解码后数据中不含关键字，则认为原始数据就是明文
-      if (!decodedData.includes('proxies:') && !decodedData.includes('port:') && !decodedData.includes('mixed-port:')) {
+      if (!decodedData.includes('proxies:') && 
+          !decodedData.includes('port:') && 
+          !decodedData.includes('mixed-port:')) {
         decodedData = rawData;
       }
     } catch (e) {
@@ -96,15 +107,15 @@ app.get('/', async (req, res) => {
     if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
       const subProxyNames = subConfig.proxies.map(p => p.name);
       
-      // 合并固定模板中的 proxies 和订阅的 proxies，避免重复（用正则归一化后根据 name 去重）
+      // 合并固定模板中的 proxies 和订阅的 proxies，避免重复（归一化后根据 name 去重）
       if (fixedConfig.proxies && Array.isArray(fixedConfig.proxies)) {
         const existingProxiesMap = {};
         fixedConfig.proxies.forEach(proxy => {
-          const normalized = proxy.name.replace(/\s+/g, '').toLowerCase();
+          const normalized = normalizeName(proxy.name);
           existingProxiesMap[normalized] = proxy;
         });
         subConfig.proxies.forEach(proxy => {
-          const normalized = proxy.name.replace(/\s+/g, '').toLowerCase();
+          const normalized = normalizeName(proxy.name);
           existingProxiesMap[normalized] = proxy;
         });
         fixedConfig.proxies = Object.values(existingProxiesMap);
@@ -116,12 +127,16 @@ app.get('/', async (req, res) => {
       if (fixedConfig['proxy-groups']) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.proxies && Array.isArray(group.proxies)) {
-            // 如果分组名称为“手动策略”，则合并手动配置和订阅代理，并用正则过滤去重
+            // 针对“手动策略”组，过滤掉已经存在的订阅节点（归一化对比）
             if (group.name === '手动策略') {
-              const merged = dedupeNames([...group.proxies, ...subProxyNames]);
+              const manualNodes = group.proxies;
+              const manualSet = new Set(manualNodes.map(normalizeName));
+              // 只保留那些不在手动配置中的订阅节点
+              const newSubNodes = subProxyNames.filter(name => !manualSet.has(normalizeName(name)));
+              const merged = dedupeNames([...manualNodes, ...newSubNodes]);
               return { ...group, proxies: merged };
             } else {
-              // 对于其他动态分组，直接替换为订阅代理的名称列表
+              // 其他分组直接替换为订阅节点
               return { ...group, proxies: subProxyNames };
             }
           }
