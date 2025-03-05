@@ -1,9 +1,13 @@
 {
-  "name": "sub-converter",
+  "name": "my-clash-app",
   "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "express": "^4.18.2",
-    "axios": "^1.6.7",
+    "axios": "^1.4.0",
     "js-yaml": "^4.1.0"
   }
 }
