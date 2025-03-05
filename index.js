@@ -145,6 +145,11 @@ app.get('/', async (req, res) => {
       }
     }
     
+    // ★★ 关键：移除 proxy-providers，避免 ClashMeta 再次加载重复订阅节点 ★★
+    if (fixedConfig['proxy-providers']) {
+      delete fixedConfig['proxy-providers'];
+    }
+    
     // 7. 输出最终的 YAML 配置
     res.set('Content-Type', 'text/yaml');
     res.send(yaml.dump(fixedConfig));
