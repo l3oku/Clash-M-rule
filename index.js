@@ -5,24 +5,28 @@ const app = express();
 
 const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
-// 用正则提取“服务器-端口”，构造归一化的标识
-function normalizeName(name) {
-  // 匹配形如 "server-port" 或 "server port" 的格式
-  const match = name.match(/^([^-\s]+)[-\s]*(\d+)$/);
-  if (match) {
-    return match[1].toLowerCase() + ':' + match[2];
-  }
-  return name.replace(/\s+/g, '').toLowerCase();
+// 用正则移除常见 emoji，并归一化节点名称
+function canonicalizeName(name) {
+  if (!name) return '';
+  // 移除 emoji（涵盖常见区间：U+1F300-U+1F6FF 和 U+1F1E6-U+1F1FF）
+  let canonical = name.replace(/[\u{1F300}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}]/gu, '');
+  // 移除所有空白字符
+  canonical = canonical.replace(/\s+/g, '');
+  // 移除连字符和破折号（防止因标点不同而被认为不同）
+  canonical = canonical.replace(/[-—]/g, '');
+  // 转为小写
+  canonical = canonical.toLowerCase();
+  return canonical;
 }
 
-// 归一化后去重
+// 归一化后去重：传入的名称数组会先做 canonicalizeName 再比对
 function dedupeNames(names) {
   const seen = new Set();
   const result = [];
   names.forEach(name => {
-    const normalized = normalizeName(name);
-    if (!seen.has(normalized)) {
-      seen.add(normalized);
+    const key = canonicalizeName(name);
+    if (!seen.has(key)) {
+      seen.add(key);
       result.push(name);
     }
   });
@@ -67,7 +71,7 @@ app.get('/', async (req, res) => {
       decodedData = rawData;
     }
     
-    // 4. 根据数据内容判断：如果包含 proxies 或 port，则认为是标准 YAML 配置
+    // 4. 判断数据格式：如果包含 proxies 或 port，则认为是 YAML 配置
     let subConfig = null;
     if (
       decodedData.includes('proxies:') ||
@@ -82,7 +86,7 @@ app.get('/', async (req, res) => {
         }
       }
     } else {
-      // 5. 如果不符合 YAML 格式，则尝试解析为自定义格式（假设每行一个节点，字段用 | 分隔）
+      // 5. 如果不是 YAML 格式，则尝试按自定义格式解析（每行一个节点，字段用 | 分隔）
       const proxies = decodedData
         .split('\n')
         .filter(line => line.trim())
@@ -103,22 +107,22 @@ app.get('/', async (req, res) => {
       subConfig = { proxies };
     }
     
-    // 6. 将订阅数据中的代理列表嫁接到固定模板中
+    // 6. 合并订阅节点到固定模板中
     if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
       const subProxyNames = subConfig.proxies.map(p => p.name);
       
-      // 合并固定模板中的 proxies 和订阅的 proxies，避免重复（归一化后根据 name 去重）
+      // 合并 fixedConfig.proxies 和订阅的 proxies，使用 canonicalizeName 进行归一化去重
       if (fixedConfig.proxies && Array.isArray(fixedConfig.proxies)) {
-        const existingProxiesMap = {};
+        const proxyMap = {};
         fixedConfig.proxies.forEach(proxy => {
-          const normalized = normalizeName(proxy.name);
-          existingProxiesMap[normalized] = proxy;
+          const key = canonicalizeName(proxy.name);
+          proxyMap[key] = proxy;
         });
         subConfig.proxies.forEach(proxy => {
-          const normalized = normalizeName(proxy.name);
-          existingProxiesMap[normalized] = proxy;
+          const key = canonicalizeName(proxy.name);
+          proxyMap[key] = proxy;
         });
-        fixedConfig.proxies = Object.values(existingProxiesMap);
+        fixedConfig.proxies = Object.values(proxyMap);
       } else {
         fixedConfig.proxies = subConfig.proxies;
       }
@@ -127,16 +131,16 @@ app.get('/', async (req, res) => {
       if (fixedConfig['proxy-groups']) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.proxies && Array.isArray(group.proxies)) {
-            // 针对“手动策略”组，过滤掉已经存在的订阅节点（归一化对比）
-            if (group.name === '手动策略') {
+            // 针对“手动切换”组（注意保持与固定模板一致）
+            if (group.name === '手动切换') {
               const manualNodes = group.proxies;
-              const manualSet = new Set(manualNodes.map(normalizeName));
-              // 只保留那些不在手动配置中的订阅节点
-              const newSubNodes = subProxyNames.filter(name => !manualSet.has(normalizeName(name)));
+              const manualSet = new Set(manualNodes.map(canonicalizeName));
+              // 过滤订阅节点中已存在的（归一化后判断）
+              const newSubNodes = subProxyNames.filter(name => !manualSet.has(canonicalizeName(name)));
               const merged = dedupeNames([...manualNodes, ...newSubNodes]);
               return { ...group, proxies: merged };
             } else {
-              // 其他分组直接替换为订阅节点
+              // 其他分组直接使用订阅节点
               return { ...group, proxies: subProxyNames };
             }
           }
@@ -145,12 +149,12 @@ app.get('/', async (req, res) => {
       }
     }
     
-    // ★★ 关键：移除 proxy-providers，避免 ClashMeta 再次加载重复订阅节点 ★★
+    // ★★ 移除 proxy-providers（确保 ClashMeta 不会二次加载订阅节点） ★★
     if (fixedConfig['proxy-providers']) {
       delete fixedConfig['proxy-providers'];
     }
     
-    // 7. 输出最终的 YAML 配置
+    // 7. 输出最终 YAML 配置
     res.set('Content-Type', 'text/yaml');
     res.send(yaml.dump(fixedConfig));
   } catch (error) {
