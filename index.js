@@ -3,7 +3,7 @@ const axios = require('axios');
 const yaml = require('js-yaml');
 const app = express();
 
-const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
+const FIXED_CONFIG_URL = 'https://gist.githubusercontent.com/lyc8503/ec737da6abe9aeae9c6a1e495753afe4/raw/f02415405279563260afd3c341cb57543b01bb83/clash_config.yml';
 
 // 用正则移除常见 emoji，并归一化节点名称
 function canonicalizeName(name) {
