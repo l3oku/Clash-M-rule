@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const yaml = require('js-yaml');
+
 const app = express();
 
 const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
@@ -13,7 +14,7 @@ async function loadYaml(url) {
   return yaml.load(response.data);
 }
 
-// 主接口：合并固定模板与订阅数据
+// 接口1：转换订阅数据，将订阅中的代理合并到固定模板中
 app.get('/', async (req, res) => {
   const subUrl = req.query.url; // 获取用户传入的订阅链接
   if (!subUrl) {
@@ -24,7 +25,7 @@ app.get('/', async (req, res) => {
     // 1. 加载固定 YAML 配置作为模板
     const fixedConfig = await loadYaml(FIXED_CONFIG_URL);
     
-    // 2. 从订阅链接获取原始数据，转发客户端请求头
+    // 2. 从订阅链接获取原始数据，同时转发客户端请求头
     const clientHeaders = {
       'User-Agent': req.headers['user-agent'] || 'Clash Verge',
       'Cookie': req.headers['cookie'] || ''
@@ -33,12 +34,12 @@ app.get('/', async (req, res) => {
       headers: clientHeaders
     });
     const rawData = response.data;
-
-    // 3. 尝试 Base64 解码（如果传入的数据经过编码）
+    
+    // 3. 尝试 Base64 解码（如果数据经过编码）
     let decodedData;
     try {
       decodedData = Buffer.from(rawData, 'base64').toString('utf-8');
-      // 如果解码后数据中不含关键字，则认为原始数据就是明文
+      // 如果解码后不含关键字，则认为原始数据就是明文
       if (!decodedData.includes('proxies:') && !decodedData.includes('port:') && !decodedData.includes('mixed-port:')) {
         decodedData = rawData;
       }
@@ -46,7 +47,7 @@ app.get('/', async (req, res) => {
       decodedData = rawData;
     }
     
-    // 4. 判断数据内容：如果包含 proxies 或 port，则认为是标准 YAML 配置
+    // 4. 根据数据内容判断是否为 YAML 格式
     let subConfig = null;
     if (
       decodedData.includes('proxies:') ||
@@ -61,7 +62,7 @@ app.get('/', async (req, res) => {
         }
       }
     } else {
-      // 5. 否则尝试解析为自定义格式（假设每行一个节点，字段用 | 分隔）
+      // 5. 尝试解析为自定义格式（每行一个节点，字段用 | 分隔）
       const proxies = decodedData
         .split('\n')
         .filter(line => line.trim())
@@ -82,7 +83,7 @@ app.get('/', async (req, res) => {
       subConfig = { proxies };
     }
     
-    // 6. 将订阅数据中的代理列表嫁接到固定模板中
+    // 6. 将订阅中的代理列表嫁接到固定模板中
     if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
       fixedConfig.proxies = subConfig.proxies;
       
@@ -105,27 +106,13 @@ app.get('/', async (req, res) => {
   }
 });
 
-// 可选接口：直接反向代理订阅链接，支持流式传输
+// 接口2：/proxy 接口直接 302 重定向到订阅链接，让客户端直接请求
 app.get('/proxy', (req, res) => {
   const subUrl = req.query.url;
   if (!subUrl) return res.status(400).send('请提供订阅链接，例如 ?url=你的订阅地址');
   
-  const clientHeaders = {
-    'User-Agent': req.headers['user-agent'] || 'Clash Verge',
-    'Cookie': req.headers['cookie'] || ''
-  };
-
-  axios({
-    method: 'get',
-    url: subUrl,
-    responseType: 'stream',
-    headers: clientHeaders
-  }).then(response => {
-    res.set(response.headers);
-    response.data.pipe(res);
-  }).catch(error => {
-    res.status(500).send(`获取订阅失败：${error.message}`);
-  });
+  // 302 重定向，使客户端直接请求机场订阅链接，流量能正确计入
+  res.redirect(302, subUrl);
 });
 
 module.exports = app;
