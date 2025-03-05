@@ -13,6 +13,7 @@ async function loadYaml(url) {
   return yaml.load(response.data);
 }
 
+// 主接口：合并固定模板与订阅数据
 app.get('/', async (req, res) => {
   const subUrl = req.query.url; // 获取用户传入的订阅链接
   if (!subUrl) {
@@ -20,12 +21,16 @@ app.get('/', async (req, res) => {
   }
   
   try {
-    // 1. 加载你的固定 YAML 配置作为模板
+    // 1. 加载固定 YAML 配置作为模板
     const fixedConfig = await loadYaml(FIXED_CONFIG_URL);
     
-    // 2. 从订阅链接获取原始数据
+    // 2. 从订阅链接获取原始数据，转发客户端请求头
+    const clientHeaders = {
+      'User-Agent': req.headers['user-agent'] || 'Clash Verge',
+      'Cookie': req.headers['cookie'] || ''
+    };
     const response = await axios.get(subUrl, {
-      headers: { 'User-Agent': 'Clash Verge' }
+      headers: clientHeaders
     });
     const rawData = response.data;
 
@@ -41,7 +46,7 @@ app.get('/', async (req, res) => {
       decodedData = rawData;
     }
     
-    // 4. 根据数据内容判断：如果包含 proxies 或 port，则认为是标准 YAML 配置
+    // 4. 判断数据内容：如果包含 proxies 或 port，则认为是标准 YAML 配置
     let subConfig = null;
     if (
       decodedData.includes('proxies:') ||
@@ -56,7 +61,7 @@ app.get('/', async (req, res) => {
         }
       }
     } else {
-      // 5. 如果不符合 YAML 格式，则尝试解析为自定义格式（假设每行一个节点，字段用 | 分隔）
+      // 5. 否则尝试解析为自定义格式（假设每行一个节点，字段用 | 分隔）
       const proxies = decodedData
         .split('\n')
         .filter(line => line.trim())
@@ -78,15 +83,13 @@ app.get('/', async (req, res) => {
     }
     
     // 6. 将订阅数据中的代理列表嫁接到固定模板中
-    // 这里假设你的固定配置中有 proxies 字段以及对应的 proxy-groups，
-    // 我们用订阅数据的 proxies 替换模板中的代理，并更新 proxy-groups 中的代理名称列表
     if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
       fixedConfig.proxies = subConfig.proxies;
       
       if (fixedConfig['proxy-groups']) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.proxies && Array.isArray(group.proxies)) {
-            // 如果该分组原本就是动态选择的，更新为订阅代理的名称列表
+            // 更新为订阅代理的名称列表
             return { ...group, proxies: subConfig.proxies.map(p => p.name) };
           }
           return group;
@@ -94,12 +97,35 @@ app.get('/', async (req, res) => {
       }
     }
     
-    // 7. 输出最终的 YAML 配置，格式即为你固定的 PAKO.yaml 模板
+    // 7. 输出最终的 YAML 配置
     res.set('Content-Type', 'text/yaml');
     res.send(yaml.dump(fixedConfig));
   } catch (error) {
     res.status(500).send(`转换失败：${error.message}`);
   }
+});
+
+// 可选接口：直接反向代理订阅链接，支持流式传输
+app.get('/proxy', (req, res) => {
+  const subUrl = req.query.url;
+  if (!subUrl) return res.status(400).send('请提供订阅链接，例如 ?url=你的订阅地址');
+  
+  const clientHeaders = {
+    'User-Agent': req.headers['user-agent'] || 'Clash Verge',
+    'Cookie': req.headers['cookie'] || ''
+  };
+
+  axios({
+    method: 'get',
+    url: subUrl,
+    responseType: 'stream',
+    headers: clientHeaders
+  }).then(response => {
+    res.set(response.headers);
+    response.data.pipe(res);
+  }).catch(error => {
+    res.status(500).send(`获取订阅失败：${error.message}`);
+  });
 });
 
 module.exports = app;
