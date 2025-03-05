@@ -20,7 +20,7 @@ app.get('/', async (req, res) => {
   }
   
   try {
-    // 1. 加载你的固定 YAML 配置作为模板
+    // 1. 加载固定 YAML 配置作为模板
     const fixedConfig = await loadYaml(FIXED_CONFIG_URL);
     
     // 2. 从订阅链接获取原始数据
@@ -78,23 +78,42 @@ app.get('/', async (req, res) => {
     }
     
     // 6. 将订阅数据中的代理列表嫁接到固定模板中
-    // 这里假设你的固定配置中有 proxies 字段以及对应的 proxy-groups，
-    // 我们用订阅数据的 proxies 替换模板中的代理，并更新 proxy-groups 中的代理名称列表
     if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
-      fixedConfig.proxies = subConfig.proxies;
+      const subProxyNames = subConfig.proxies.map(p => p.name);
       
+      // 合并固定模板中的 proxies 和订阅的 proxies，避免重复（根据 name 去重）
+      if (fixedConfig.proxies && Array.isArray(fixedConfig.proxies)) {
+        const existingProxiesMap = {};
+        fixedConfig.proxies.forEach(proxy => {
+          existingProxiesMap[proxy.name] = proxy;
+        });
+        subConfig.proxies.forEach(proxy => {
+          existingProxiesMap[proxy.name] = proxy;
+        });
+        fixedConfig.proxies = Object.values(existingProxiesMap);
+      } else {
+        fixedConfig.proxies = subConfig.proxies;
+      }
+      
+      // 更新 proxy-groups 中的代理名称列表
       if (fixedConfig['proxy-groups']) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.proxies && Array.isArray(group.proxies)) {
-            // 如果该分组原本就是动态选择的，更新为订阅代理的名称列表
-            return { ...group, proxies: subConfig.proxies.map(p => p.name) };
+            // 如果分组名称为“手动策略”，则合并手动配置和订阅代理（去重）
+            if (group.name === '手动策略') {
+              const merged = Array.from(new Set([...group.proxies, ...subProxyNames]));
+              return { ...group, proxies: merged };
+            } else {
+              // 对于动态分组，直接替换为订阅代理的名称列表
+              return { ...group, proxies: subProxyNames };
+            }
           }
           return group;
         });
       }
     }
     
-    // 7. 输出最终的 YAML 配置，格式即为你固定的 PAKO2-ZIYONG.yaml 模板
+    // 7. 输出最终的 YAML 配置
     res.set('Content-Type', 'text/yaml');
     res.send(yaml.dump(fixedConfig));
   } catch (error) {
