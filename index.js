@@ -4,29 +4,37 @@ const yaml = require('js-yaml');
 const app = express();
 
 app.get('/', async (req, res) => {
-  const subUrl = req.query.url;
+  const subUrl = req.query.url; // 从 URL 参数获取订阅链接
   if (!subUrl) {
     return res.status(400).send('请提供订阅链接，例如 ?url=你的订阅地址');
   }
-
+  
   try {
+    // 从订阅链接获取原始数据
     const response = await axios.get(subUrl, {
       headers: { 'User-Agent': 'Clash Verge' }
     });
     const rawData = response.data;
 
-    // 尝试 Base64 解码
+    // 尝试Base64解码，解码后的数据如果看起来不是 YAML（缺少 proxies、port 等关键字），则直接使用原始数据
     let decodedData;
     try {
       decodedData = Buffer.from(rawData, 'base64').toString('utf-8');
+      if (!decodedData.includes('proxies:') && !decodedData.includes('port:') && !decodedData.includes('mixed-port:')) {
+        decodedData = rawData;
+      }
     } catch (e) {
       decodedData = rawData;
     }
 
-    // 尝试解析为 YAML
-    try {
-      const configFromYaml = yaml.load(decodedData);
-      if (configFromYaml && typeof configFromYaml === 'object' && !Array.isArray(configFromYaml) && configFromYaml.proxies) {
+    // 如果数据中包含 proxies 或 port 关键字，则认为它是完整的 YAML 配置
+    if (
+      decodedData.includes('proxies:') ||
+      decodedData.includes('port:') ||
+      decodedData.includes('mixed-port:')
+    ) {
+      let configFromYaml = yaml.load(decodedData);
+      if (configFromYaml && typeof configFromYaml === 'object' && !Array.isArray(configFromYaml)) {
         if (configFromYaml['mixed-port'] !== undefined) {
           configFromYaml.port = configFromYaml['mixed-port'];
           delete configFromYaml['mixed-port'];
@@ -34,29 +42,18 @@ app.get('/', async (req, res) => {
         res.set('Content-Type', 'text/yaml');
         return res.send(yaml.dump(configFromYaml));
       }
-    } catch (e) {
-      // 不是有效的 YAML 配置，继续
     }
-
-    // 按自定义格式解析，确保代理名称唯一
-    const proxyNames = new Set();
-    const proxies = decodedData
+    
+    // 否则，尝试按照自定义格式解析（假设每行一个节点，字段以 | 分隔）
+    let proxies = decodedData
       .split('\n')
       .filter(line => line.trim())
-      .map((line, index) => {
+      .map(line => {
         const parts = line.split('|');
         if (parts.length < 5) return null;
         const [type, server, port, cipher, password] = parts;
-        let baseName = `${server}-${port}`;
-        let name = baseName;
-        let counter = 1;
-        while (proxyNames.has(name)) {
-          name = `${baseName}-${counter}`;
-          counter++;
-        }
-        proxyNames.add(name);
         return {
-          name,
+          name: `${server}-${port}`,
           type: type || 'ss',
           server,
           port: parseInt(port),
@@ -66,7 +63,29 @@ app.get('/', async (req, res) => {
       })
       .filter(item => item !== null);
 
-    // 生成 Clash 配置
+    // 方法 3：对 proxies 进行去重，防止重复节点导致 Meta 重复显示
+    const uniqueProxies = [];
+    const seen = new Set();
+    for (const proxy of proxies) {
+      if (!seen.has(proxy.name)) {
+        seen.add(proxy.name);
+        uniqueProxies.push(proxy);
+      }
+    }
+    proxies = uniqueProxies;
+    
+    // 方法 2（可选）：添加一个占位符节点，有时可避免 Meta 将第一个节点重复展示
+    // proxies.unshift({
+    //   name: 'Placeholder',
+    //   type: 'direct'
+    // });
+
+    // 方法 1：调整 proxy-groups 中的节点数量，避免全部节点在 Auto 组中重复出现
+    const autoGroupProxies = proxies.length > 5 
+      ? proxies.slice(0, 5).map(p => p.name) 
+      : proxies.map(p => p.name);
+
+    // 生成新版 Clash 配置文件
     const config = {
       port: 7890,
       'socks-port': 7891,
@@ -78,7 +97,7 @@ app.get('/', async (req, res) => {
         {
           name: 'Auto',
           type: 'url-test',
-          proxies: proxies.map(p => p.name),
+          proxies: autoGroupProxies,
           url: 'http://www.gstatic.com/generate_204',
           interval: 300
         }
@@ -106,4 +125,3 @@ app.get('/', async (req, res) => {
 });
 
 module.exports = app;
-​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​
