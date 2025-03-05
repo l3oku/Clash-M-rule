@@ -5,6 +5,21 @@ const app = express();
 
 const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
+// 辅助函数：通过正则过滤对节点名称进行归一化，并去重
+function dedupeNames(names) {
+  const seen = new Set();
+  const result = [];
+  names.forEach(name => {
+    // 用正则去除所有空白字符，并转成小写进行归一化
+    const normalized = name.replace(/\s+/g, '').toLowerCase();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(name);
+    }
+  });
+  return result;
+}
+
 // 工具函数：加载远程 YAML 配置并解析为对象
 async function loadYaml(url) {
   const response = await axios.get(url, {
@@ -81,14 +96,16 @@ app.get('/', async (req, res) => {
     if (subConfig && subConfig.proxies && subConfig.proxies.length > 0) {
       const subProxyNames = subConfig.proxies.map(p => p.name);
       
-      // 合并固定模板中的 proxies 和订阅的 proxies，避免重复（根据 name 去重）
+      // 合并固定模板中的 proxies 和订阅的 proxies，避免重复（用正则归一化后根据 name 去重）
       if (fixedConfig.proxies && Array.isArray(fixedConfig.proxies)) {
         const existingProxiesMap = {};
         fixedConfig.proxies.forEach(proxy => {
-          existingProxiesMap[proxy.name] = proxy;
+          const normalized = proxy.name.replace(/\s+/g, '').toLowerCase();
+          existingProxiesMap[normalized] = proxy;
         });
         subConfig.proxies.forEach(proxy => {
-          existingProxiesMap[proxy.name] = proxy;
+          const normalized = proxy.name.replace(/\s+/g, '').toLowerCase();
+          existingProxiesMap[normalized] = proxy;
         });
         fixedConfig.proxies = Object.values(existingProxiesMap);
       } else {
@@ -99,12 +116,12 @@ app.get('/', async (req, res) => {
       if (fixedConfig['proxy-groups']) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.proxies && Array.isArray(group.proxies)) {
-            // 如果分组名称为“手动策略”，则合并手动配置和订阅代理（去重）
+            // 如果分组名称为“手动策略”，则合并手动配置和订阅代理，并用正则过滤去重
             if (group.name === '手动策略') {
-              const merged = Array.from(new Set([...group.proxies, ...subProxyNames]));
+              const merged = dedupeNames([...group.proxies, ...subProxyNames]);
               return { ...group, proxies: merged };
             } else {
-              // 对于动态分组，直接替换为订阅代理的名称列表
+              // 对于其他动态分组，直接替换为订阅代理的名称列表
               return { ...group, proxies: subProxyNames };
             }
           }
