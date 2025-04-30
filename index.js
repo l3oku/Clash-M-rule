@@ -3,7 +3,7 @@ const axios = require('axios');
 const yaml = require('js-yaml');
 const app = express();
 
-const FIXED_CONFIG_URL = 'https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
+const FIXED_CONFIG_URL = 'https://gh.ikuu.eu.org/https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
 async function loadYaml(url) {
   const response = await axios.get(url, { headers: { 'User-Agent': 'Clash Verge' } });
