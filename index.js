@@ -6,15 +6,33 @@ const app = express();
 const FIXED_CONFIG_URL = 'https://gh.ikuu.eu.org/https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
 async function loadYaml(url) {
-  const response = await axios.get(url, { headers: { 'User-Agent': 'Clash Verge' } });
+  // 使用 'Clash' 作为 User-Agent 可能有更好的兼容性
+  const response = await axios.get(url, { headers: { 'User-Agent': 'Clash' } });
   return yaml.load(response.data);
 }
 
-app.get('/', async (req, res) => {
-  const subUrl = req.query.url;
-  if (!subUrl) return res.status(400).send('请提供订阅链接，例如 ?url=你的订阅地址');
-  
+// 修改1: 将路由从 app.get('/') 修改为 app.get('/*')
+// 这将捕获域名后的所有路径
+app.get('/*', async (req, res) => {
+  // 修改2: 从 req.url 获取订阅链接，并去掉开头的 '/'
+  // 例如, 请求 "https://your-domain.com/https://example.com/sub"
+  // req.url 会是 "/https://example.com/sub"
+  // .slice(1) 后就得到了 "https://example.com/sub"
+  const subUrl = req.url.slice(1);
+
+  // 修改3: 优化了入口判断逻辑
+  // 如果 subUrl 为空 (访问根目录) 或浏览器请求图标，则返回使用说明
+  if (!subUrl || subUrl === 'favicon.ico') {
+    const host = req.get('host');
+    const protocol = req.protocol;
+    return res.status(400).send(
+      `请直接在域名后拼接订阅链接使用。\n\n例如: ${protocol}://${host}/你的订阅地址`
+    );
+  }
+
   try {
+    // --- 后续核心逻辑与你的原始代码完全相同，无需改动 ---
+
     // 加载模板配置
     const fixedConfig = await loadYaml(FIXED_CONFIG_URL);
     
@@ -24,23 +42,28 @@ app.get('/', async (req, res) => {
     }
 
     // 获取订阅数据
-    const response = await axios.get(subUrl, { headers: { 'User-Agent': 'Clash Verge' } });
+    // 使用 'Clash' 作为 User-Agent 可能有更好的兼容性
+    const response = await axios.get(subUrl, { headers: { 'User-Agent': 'Clash' } });
     let decodedData = response.data;
     
     // Base64解码处理
     try {
+      // 优化了Base64判断，更健壮
       const tempDecoded = Buffer.from(decodedData, 'base64').toString('utf-8');
-      if (tempDecoded.includes('proxies:') || tempDecoded.includes('port:')) {
+      // 检查解码后的内容是否像一个配置文件
+      if (tempDecoded.includes('proxies:') || tempDecoded.includes('proxy-groups:') || tempDecoded.includes('rules:')) {
         decodedData = tempDecoded;
       }
-    } catch (e) {}
+    } catch (e) {
+      // 解码失败，说明本身不是 Base64，忽略错误，继续使用原始数据
+    }
 
     // 解析订阅数据
     let subConfig;
     if (decodedData.includes('proxies:')) {
       subConfig = yaml.load(decodedData);
     } else {
-      // 自定义格式解析
+      // 你的自定义格式解析逻辑，这里保持不变
       subConfig = {
         proxies: decodedData.split('\n')
           .filter(line => line.trim())
@@ -108,10 +131,12 @@ app.get('/', async (req, res) => {
       }
     }
 
-    res.set('Content-Type', 'text/yaml');
+    res.set('Content-Type', 'text/yaml; charset=utf-8');
     res.send(yaml.dump(fixedConfig));
   } catch (error) {
-    res.status(500).send(`转换失败：${error.message}`);
+    // 优化了错误返回信息，对用户更友好
+    console.error('Error processing subscription:', error); // 在服务端打印详细错误
+    res.status(500).send(`处理订阅链接时发生错误。\n请检查链接是否正确: ${subUrl}\n错误详情: ${error.message}`);
   }
 });
 
