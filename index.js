@@ -6,63 +6,45 @@ const app = express();
 const FIXED_CONFIG_URL = 'https://gh.ikuu.eu.org/https://raw.githubusercontent.com/l3oku/clashrule-lucy/refs/heads/main/Mihomo.yaml';
 
 async function loadYaml(url) {
-  const response = await axios.get(url, { headers: { 'User-Agent': 'Clash' } });
+  const response = await axios.get(url, { headers: { 'User-Agent': 'Clash Verge' } });
   return yaml.load(response.data);
 }
 
+// 修改点 1: 将路由从 app.get('/') 修改为 app.get('/*')
+// 这将捕获根路径 (/) 之后的所有内容作为路径参数
 app.get('/*', async (req, res) => {
-  // ====================== 调试日志开始 ======================
-  console.log('\n\n--- [STEP 1] INCOMING REQUEST ---');
-  console.log(`Raw URL from client (req.originalUrl): ${req.originalUrl}`);
-  // =========================================================
+  // 修改点 2: 从请求路径 (req.path) 中提取订阅链接
+  // req.path 会获取到类似 '/https://...' 的字符串
+  const path = req.path;
 
-  // Clash客户端或浏览器可能会自动编码URL，所以我们必须解码
-  // 这是一个非常关键的步骤，很可能是之前失败的原因
-  let subUrl;
-  try {
-      subUrl = decodeURIComponent(req.originalUrl.slice(1));
-  } catch (e) {
-      // 如果解码失败，说明URL可能没被编码，直接使用
-      subUrl = req.originalUrl.slice(1);
+  // 如果用户只访问根域名，没有提供任何订阅链接，则返回提示
+  if (path === '/') {
+    return res.status(400).send('请在域名后直接拼接订阅链接，例如 /https://你的订阅地址');
   }
-  
-  // ====================== 调试日志 ======================
-  console.log(`--- [STEP 2] PROCESSED SUBSCRIPTION URL ---`);
-  console.log(`Decoded URL to be fetched: ${subUrl}`);
-  // =========================================================
 
-  if (!subUrl || subUrl === 'favicon.ico') {
-    return res.status(400).send('请在域名后直接拼接订阅链接。');
-  }
-  
+  // 修改点 3: 去掉路径开头的 '/', 得到真实的订阅链接
+  const subUrl = path.substring(1);
+
+  // --- 从这里开始，后面的所有代码逻辑都与您原来的一模一样，无需改动 ---
+
   try {
+    // 加载模板配置
     const fixedConfig = await loadYaml(FIXED_CONFIG_URL);
+
+    // 确保proxies字段存在且为数组
     if (!Array.isArray(fixedConfig.proxies)) {
       fixedConfig.proxies = [];
     }
 
-    // ====================== 调试日志 ======================
-    console.log('--- [STEP 3] FETCHING SUBSCRIPTION CONTENT ---');
-    // =========================================================
-    const response = await axios.get(subUrl, { headers: { 'User-Agent': 'Clash' } });
+    // 获取订阅数据
+    const response = await axios.get(subUrl, { headers: { 'User-Agent': 'Clash Verge' } });
     let decodedData = response.data;
 
-    // ====================== 调试日志 ======================
-    console.log('--- [STEP 4] RECEIVED SUBSCRIPTION CONTENT ---');
-    console.log('Data type:', typeof decodedData);
-    // 只打印前300个字符，避免刷屏和泄露过多信息
-    console.log('Data (first 300 chars):', String(decodedData).substring(0, 300));
-    // =========================================================
-    
     // Base64解码处理
     try {
       const tempDecoded = Buffer.from(decodedData, 'base64').toString('utf-8');
-      if (tempDecoded.includes('proxies:') || tempDecoded.includes('proxy-groups:') || tempDecoded.includes('rules:')) {
+      if (tempDecoded.includes('proxies:') || tempDecoded.includes('port:')) {
         decodedData = tempDecoded;
-        // ====================== 调试日志 ======================
-        console.log('--- [STEP 4.1] DECODED FROM BASE64 ---');
-        console.log('Decoded Data (first 300 chars):', decodedData.substring(0, 300));
-        // =========================================================
       }
     } catch (e) {}
 
@@ -71,6 +53,7 @@ app.get('/*', async (req, res) => {
     if (decodedData.includes('proxies:')) {
       subConfig = yaml.load(decodedData);
     } else {
+      // 自定义格式解析
       subConfig = {
         proxies: decodedData.split('\n')
           .filter(line => line.trim())
@@ -88,24 +71,29 @@ app.get('/*', async (req, res) => {
           .filter(Boolean)
       };
     }
-
-    // ====================== 调试日志 ======================
-    console.log('--- [STEP 5] PARSING RESULT ---');
-    const proxyCount = subConfig?.proxies?.length || 0;
-    console.log(`Number of proxies found in subscription: ${proxyCount}`);
-    if (proxyCount > 0) {
-        console.log('First proxy found:', JSON.stringify(subConfig.proxies[0]));
-    }
-    // =========================================================
-
-    // 核心逻辑
-    if (proxyCount > 0) {
+    
+    // 核心逻辑：混合模板与订阅代理 (这部分完全保留，确保节点信息不会丢失)
+    if (subConfig?.proxies?.length > 0) {
+      // 1. 保留模板所有代理
       const templateProxies = [...fixedConfig.proxies];
+
+      // 2. 替换第一个代理的服务器信息（保留名称）
       if (templateProxies.length > 0) {
         const subProxy = subConfig.proxies[0];
-        templateProxies[0] = { ...templateProxies[0], ...subProxy }; // 简化合并逻辑
+        templateProxies[0] = {
+          ...templateProxies[0],
+          server: subProxy.server,
+          port: subProxy.port || templateProxies[0].port,
+          password: subProxy.password || templateProxies[0].password,
+          cipher: subProxy.cipher || templateProxies[0].cipher,
+          type: subProxy.type || templateProxies[0].type
+        };
       }
+
+      // 3. 合并代理列表（模板代理 + 订阅代理）
       const mergedProxies = [...templateProxies, ...subConfig.proxies];
+
+      // 4. 根据名称去重（保留第一个出现的代理）
       const seen = new Map();
       fixedConfig.proxies = mergedProxies.filter(proxy => {
         if (!proxy?.name) return false;
@@ -115,12 +103,16 @@ app.get('/*', async (req, res) => {
         }
         return false;
       });
+
+      // 5. 更新PROXY组
       if (Array.isArray(fixedConfig['proxy-groups'])) {
         fixedConfig['proxy-groups'] = fixedConfig['proxy-groups'].map(group => {
           if (group.name === 'PROXY' && Array.isArray(group.proxies)) {
             return {
               ...group,
-              proxies: group.proxies.filter(name => fixedConfig.proxies.some(p => p.name === name))
+              proxies: group.proxies.filter(name => 
+                fixedConfig.proxies.some(p => p.name === name)
+              )
             };
           }
           return group;
@@ -128,20 +120,11 @@ app.get('/*', async (req, res) => {
       }
     }
 
-    // ====================== 调试日志 ======================
-    console.log('--- [STEP 6] FINAL RESULT ---');
-    console.log(`Total proxies after merging: ${fixedConfig.proxies.length}`);
-    // =========================================================
-
-    res.set('Content-Type', 'text/yaml; charset=utf-8');
+    res.set('Content-Type', 'text/yaml');
     res.send(yaml.dump(fixedConfig));
 
   } catch (error) {
-    // ====================== 调试日志 ======================
-    console.error('--- [ERROR] AN EXCEPTION OCCURRED ---');
-    console.error(error);
-    // =========================================================
-    res.status(500).send(`处理订阅链接时发生错误。\n请检查服务器日志获取详情。\n错误: ${error.message}`);
+    res.status(500).send(`转换失败：${error.message}`);
   }
 });
 
