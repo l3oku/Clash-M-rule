@@ -16,7 +16,7 @@ app.get('/*', async (req, res) => {
 
   // 如果用户只访问根域名，返回提示
   if (originalUrlPath === '/') {
-    return res.status(400).send('请在域名后直接拼接订阅链接，https://clashmeta.ikee.eu.org/你的订阅地址');
+    return res.status(400).send('请在域名后直接拼接订阅链接，例如:https://clashmeta.ikee.eu.org/你的订阅地址');
   }
 
   // 修复点 2: 从完整路径中截取掉开头的 '/'
