@@ -10,20 +10,27 @@ async function loadYaml(url) {
   return yaml.load(response.data);
 }
 
-// 修改点 1: 将路由从 app.get('/') 修改为 app.get('/*')
-// 这将捕获根路径 (/) 之后的所有内容作为路径参数
 app.get('/*', async (req, res) => {
-  // 修改点 2: 从请求路径 (req.path) 中提取订阅链接
-  // req.path 会获取到类似 '/https://...' 的字符串
-  const path = req.path;
+  // 修复点 1: 使用 req.originalUrl 来获取完整的路径和查询参数
+  const originalUrlPath = req.originalUrl;
 
-  // 如果用户只访问根域名，没有提供任何订阅链接，则返回提示
-  if (path === '/') {
+  // 如果用户只访问根域名，返回提示
+  if (originalUrlPath === '/') {
     return res.status(400).send('请在域名后直接拼接订阅链接，例如 /https://你的订阅地址');
   }
 
-  // 修改点 3: 去掉路径开头的 '/', 得到真实的订阅链接
-  const subUrl = path.substring(1);
+  // 修复点 2: 从完整路径中截取掉开头的 '/'
+  let subUrl = originalUrlPath.substring(1);
+
+  // 健壮性优化: 对URL进行解码，以防止客户端自动编码导致链接不正确
+  // 例如，客户端可能会将 https://... 编码为 https%3A%2F%2F...
+  try {
+      subUrl = decodeURIComponent(subUrl);
+  } catch (e) {
+      // 如果解码失败，很可能是因为URL没被编码，直接使用原始URL即可
+      console.warn('URL解码失败，将使用原始URL:', subUrl);
+  }
+
 
   // --- 从这里开始，后面的所有代码逻辑都与您原来的一模一样，无需改动 ---
 
